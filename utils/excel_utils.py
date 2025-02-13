@@ -4,6 +4,7 @@ import os
 import time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from utils.helpers import safe_float
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment
@@ -106,25 +107,39 @@ def write_filtered_excel(file_path, filtered_data, buyer_info):
             worksheet.set_column(col_num, col_num, max_length + 2, writer.book.add_format({'text_wrap': True}))
     print(f"Filtered Excel file written to {file_path}")
 
+
 def format_email_body_table_html(filtered_changes, filtered_product_data):
     """
-    Build an HTML table (columns: ID, Product name, My price, Their Price, Comp Change, Diff)
+    Builds an HTML table (with columns: ID, Product name, My price, Their Price, Comp Change, Diff)
     using the filtered_changes dictionary and filtered_product_data.
+    This version adds inline styles for alternating row backgrounds.
     """
     rows_html = ""
-    from utils.helpers import safe_float
-    prod_dict = { (rec["Praktis Code"], rec["Praktiker Code"]) : rec for rec in filtered_product_data }
+    # Build a lookup dictionary for product data keyed by (Praktis Code, Praktiker Code)
+    prod_dict = {(rec["Praktis Code"], rec["Praktiker Code"]): rec for rec in filtered_product_data}
+
+    row_index = 0  # To alternate row colors
+
+    # Process records with price changes.
     for change in filtered_changes.get("price_changes", []):
         key = (change["code"], change["praktiker_code"])
         rec = prod_dict.get(key, {})
         my_price = safe_float(change.get("praktis_new_price", 0))
         their_price = safe_float(change.get("praktiker_new_price", 0))
-        comp_change = safe_float(change.get("praktiker_new_price", 0)) - safe_float(change.get("praktiker_old_price", 0))
+        comp_change = safe_float(change.get("praktiker_new_price", 0)) - safe_float(
+            change.get("praktiker_old_price", 0))
         diff = their_price - my_price
         name = rec.get("Praktis Name", "N/A")
-        diff_str = f"<span style='color:red;'>-{abs(diff):.2f}</span>" if diff < 0 else (f"<span style='color:green;'>+{diff:.2f}</span>" if diff > 0 else f"{diff:.2f}")
+        if diff < 0:
+            diff_str = f"<span style='color:red;'>-{abs(diff):.2f}</span>"
+        elif diff > 0:
+            diff_str = f"<span style='color:green;'>+{diff:.2f}</span>"
+        else:
+            diff_str = f"{diff:.2f}"
+        # Alternate row background using inline style.
+        row_style = 'background-color: #f9f9f9;' if row_index % 2 == 0 else 'background-color: #ffffff;'
         row_html = f"""
-            <tr>
+            <tr style="{row_style}">
                 <td style="border: 1px solid #ddd; padding: 8px;">{change['code']}</td>
                 <td style="border: 1px solid #ddd; padding: 8px;">{name}</td>
                 <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{my_price:.2f}</td>
@@ -134,6 +149,9 @@ def format_email_body_table_html(filtered_changes, filtered_product_data):
             </tr>
         """
         rows_html += row_html
+        row_index += 1
+
+    # Process new items.
     for update in filtered_changes.get("new_items", []):
         key = (update["Praktis Code"], update["Praktiker Code"])
         rec = prod_dict.get(key, {})
@@ -142,9 +160,15 @@ def format_email_body_table_html(filtered_changes, filtered_product_data):
         comp_change = 0.0
         diff = their_price - my_price
         name = rec.get("Praktis Name", "N/A")
-        diff_str = f"<span style='color:red;'>-{abs(diff):.2f}</span>" if diff < 0 else (f"<span style='color:green;'>+{diff:.2f}</span>" if diff > 0 else f"{diff:.2f}")
+        if diff < 0:
+            diff_str = f"<span style='color:red;'>-{abs(diff):.2f}</span>"
+        elif diff > 0:
+            diff_str = f"<span style='color:green;'>+{diff:.2f}</span>"
+        else:
+            diff_str = f"{diff:.2f}"
+        row_style = 'background-color: #f9f9f9;' if row_index % 2 == 0 else 'background-color: #ffffff;'
         row_html = f"""
-            <tr>
+            <tr style="{row_style}">
                 <td style="border: 1px solid #ddd; padding: 8px;">{update['Praktis Code']}</td>
                 <td style="border: 1px solid #ddd; padding: 8px;">{name}</td>
                 <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{my_price:.2f}</td>
@@ -154,6 +178,8 @@ def format_email_body_table_html(filtered_changes, filtered_product_data):
             </tr>
         """
         rows_html += row_html
+        row_index += 1
+
     table_html = f"""
     <html>
     <head>
@@ -174,16 +200,16 @@ def format_email_body_table_html(filtered_changes, filtered_product_data):
       </style>
     </head>
     <body>
-      <h2>Price Comparison Report</h2>
+      <h2>Репорт за променени цени</h2>
       <table>
         <thead>
           <tr>
             <th>ID</th>
-            <th>Product name</th>
-            <th>My price</th>
-            <th>Their Price</th>
-            <th>Comp Change</th>
-            <th>Diff</th>
+            <th>Име на продукт</th>
+            <th>Нашата цена</th>
+            <th>Практикер цена</th>
+            <th>Промяна конк.</th>
+            <th>Разлика</th>
           </tr>
         </thead>
         <tbody>
